@@ -4,10 +4,12 @@ import asyncio
 import base64
 import json
 import os
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .base import TtsEngine
 
@@ -92,6 +94,8 @@ class CosyVoiceHttpEngine(TtsEngine):
             detail = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"CosyVoice HTTP {exc.code}: {detail}") from exc
         except urllib.error.URLError as exc:
+            if self._should_try_windows_bridge(api_url):
+                return self._request_via_windows_curl(api_url, payload, timeout, protocol)
             raise RuntimeError(f"CosyVoice request failed: {exc.reason}") from exc
 
         if "application/json" in content_type.lower():
@@ -103,6 +107,35 @@ class CosyVoiceHttpEngine(TtsEngine):
             raise RuntimeError("CosyVoice JSON response missing 'audio_base64'")
 
         return raw
+
+    def _should_try_windows_bridge(self, api_url: str) -> bool:
+        if "microsoft" not in os.uname().release.lower():
+            return False
+        parsed = urlparse(api_url)
+        return parsed.hostname in {"127.0.0.1", "localhost"}
+
+    def _request_via_windows_curl(
+        self,
+        api_url: str,
+        payload: dict[str, object],
+        timeout: float,
+        protocol: str,
+    ) -> bytes:
+        curl_exe = "/mnt/c/Windows/System32/curl.exe"
+        if not Path(curl_exe).exists():
+            raise RuntimeError("CosyVoice request failed: Windows curl.exe not found")
+
+        cmd = [curl_exe, "-sS", "--fail", "--max-time", str(int(timeout)), "-X", "POST", api_url]
+        if protocol == "form":
+            cmd.extend(["-H", "Content-Type: application/x-www-form-urlencoded", "--data", urllib.parse.urlencode(payload)])
+        else:
+            cmd.extend(["-H", "Content-Type: application/json", "--data", json.dumps(payload, ensure_ascii=False)])
+
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        if result.returncode != 0:
+            detail = result.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"CosyVoice Windows bridge failed: {detail}")
+        return result.stdout
 
     def _resolve_protocol(self, api_url: str) -> str:
         mode = os.getenv("COSYVOICE_REQUEST_MODE", "auto").strip().lower()
