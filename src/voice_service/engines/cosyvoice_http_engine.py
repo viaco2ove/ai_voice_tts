@@ -29,10 +29,14 @@ class CosyVoiceHttpEngine(TtsEngine):
         speed: float,
         output_path: Path,
         audio_format: str,
+        mode: str = "text",
         reference_audio_base64: str | None = None,
+        reference_text: str | None = None,
+        prompt_text: str | None = None,
+        mix_voices: list[dict[str, object]] | None = None,
     ) -> None:
-        api_url = os.getenv("COSYVOICE_API_URL", "http://127.0.0.1:9233/tts")
-        timeout = float(os.getenv("COSYVOICE_TIMEOUT_SECONDS", "90"))
+        api_url = self._resolve_api_url(mode)
+        timeout = float(self.options.get("timeout_seconds", os.getenv("COSYVOICE_TIMEOUT_SECONDS", "90")))
         protocol = self._resolve_protocol(api_url)
 
         payload: dict[str, object] = {
@@ -41,13 +45,18 @@ class CosyVoiceHttpEngine(TtsEngine):
             "speed": speed,
             "format": audio_format,
             "reference_audio_base64": reference_audio_base64,
+            "reference_text": reference_text,
+            "prompt_text": prompt_text,
+            "mix_voices": mix_voices or [],
         }
         if protocol == "form":
             payload = self._build_form_payload(
                 text=text,
                 voice_id=voice_id,
                 speed=speed,
+                mode=mode,
                 reference_audio_base64=reference_audio_base64,
+                reference_text=reference_text,
             )
         elif protocol == "openai_json":
             payload = {
@@ -61,6 +70,16 @@ class CosyVoiceHttpEngine(TtsEngine):
         body = await asyncio.to_thread(self._request, api_url, payload, timeout, protocol)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(body)
+
+    def _resolve_api_url(self, mode: str) -> str:
+        env_default = os.getenv("COSYVOICE_API_URL", "http://127.0.0.1:9233/tts")
+        base_url = str(self.options.get("api_url", env_default))
+        clone_api = self.options.get("clone_api_url")
+        if mode == "clone" and clone_api:
+            return str(clone_api)
+        if mode == "clone" and base_url.endswith("/tts"):
+            return f"{base_url[:-4]}/clone"
+        return base_url
 
     def _request(
         self,
@@ -138,7 +157,7 @@ class CosyVoiceHttpEngine(TtsEngine):
         return result.stdout
 
     def _resolve_protocol(self, api_url: str) -> str:
-        mode = os.getenv("COSYVOICE_REQUEST_MODE", "auto").strip().lower()
+        mode = str(self.options.get("request_mode", os.getenv("COSYVOICE_REQUEST_MODE", "auto"))).strip().lower()
         if mode in {"json", "form", "openai_json"}:
             return mode
 
@@ -154,17 +173,27 @@ class CosyVoiceHttpEngine(TtsEngine):
         text: str,
         voice_id: str,
         speed: float,
+        mode: str,
         reference_audio_base64: str | None,
+        reference_text: str | None,
     ) -> dict[str, object]:
         payload: dict[str, object] = {"text": text, "speed": speed}
-        if reference_audio_base64:
+        if mode == "clone":
+            if not reference_audio_base64:
+                raise ValueError("clone 模式必须提供 reference_audio_base64")
             payload["reference_audio"] = reference_audio_base64
             payload["encode"] = "base64"
+            if reference_text:
+                payload["prompt_text"] = reference_text
             return payload
         payload["role"] = self._map_voice_id(voice_id)
         return payload
 
     def _map_voice_id(self, voice_id: str) -> str:
+        custom = self.options.get("voice_mapping", {})
+        if isinstance(custom, dict) and voice_id in custom:
+            return str(custom[voice_id])
+
         mapping = {
             "default_female": "中文女",
             "default_male": "中文男",
@@ -176,4 +205,4 @@ class CosyVoiceHttpEngine(TtsEngine):
             "yue_female": "粤语女",
             "kr_female": "韩语女",
         }
-        return mapping.get(voice_id.strip().lower(), "中文女")
+        return mapping.get(voice_id.strip().lower(), voice_id or "中文女")

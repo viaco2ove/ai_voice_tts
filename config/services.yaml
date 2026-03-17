@@ -1,0 +1,102 @@
+gateway:
+  host: 0.0.0.0
+  port: 8000
+  output_dir: output_audio
+  default_provider: cosyvoice_local
+
+providers:
+  cosyvoice_local:
+    engine: cosyvoice_http
+    enabled: true
+    default_voice_id: default_female
+    default_format: wav
+    supported_modes: [text, clone, mix, prompt_voice]
+    options:
+      api_url: http://127.0.0.1:9233/tts
+      clone_api_url: http://127.0.0.1:9233/clone
+      request_mode: form
+      timeout_seconds: 120
+      voice_mapping:
+        default_female: 中文女
+        default_male: 中文男
+        cn_female: 中文女
+        cn_male: 中文男
+        en_female: 英文女
+        en_male: 英文男
+    startup:
+      enabled: true
+      command: /mnt/d/Users/viaco/PycharmProjects/CosyVoice/.venv/Scripts/python.exe api.py
+      cwd: /mnt/d/Users/viaco/PycharmProjects/CosyVoice
+      wait_strategy: sleep
+      wait_seconds: 15
+      tcp_host: 127.0.0.1
+      tcp_port: 9233
+      startup_timeout_seconds: 240
+
+  edge_online:
+    engine: edge_tts
+    enabled: true
+    default_voice_id: zh-CN-XiaoxiaoNeural
+    default_format: mp3
+    supported_modes: [text, mix, prompt_voice]
+    options: {}
+    startup:
+      enabled: false
+      command: ""
+
+  mock_local:
+    engine: mock
+    enabled: true
+    default_voice_id: default_female
+    default_format: wav
+    supported_modes: [text, clone, mix, prompt_voice]
+    options: {}
+    startup:
+      enabled: false
+      command: ""
+
+voice_presets:
+  - id: default_female
+    label: 默认中文女声
+    provider: cosyvoice_local
+    voice_id: default_female
+    modes: [text, clone, mix, prompt_voice]
+    description: 默认中文女声，适合通用播报
+  - id: default_male
+    label: 默认中文男声
+    provider: cosyvoice_local
+    voice_id: default_male
+    modes: [text, clone, mix, prompt_voice]
+    description: 默认中文男声，适合说明类内容
+  - id: edge_xiaoxiao
+    label: Edge 晓晓
+    provider: edge_online
+    voice_id: zh-CN-XiaoxiaoNeural
+    modes: [text, mix, prompt_voice]
+    description: 云端中文女声
+  - id: edge_yunxi
+    label: Edge 云希
+    provider: edge_online
+    voice_id: zh-CN-YunxiNeural
+    modes: [text, mix, prompt_voice]
+    description: 云端中文男声
+
+style_presets:
+  - id: warm_story
+    label: 温柔讲述
+    provider: cosyvoice_local
+    voice_id: default_female
+    prompt_keywords: [温柔, 治愈, 讲述, 故事]
+    description: 适合故事解说、情绪平稳内容
+  - id: steady_male
+    label: 沉稳男声
+    provider: cosyvoice_local
+    voice_id: default_male
+    prompt_keywords: [沉稳, 纪录片, 说明, 男声]
+    description: 适合纪录片旁白和口播
+  - id: bright_stream
+    label: 明快播报
+    provider: edge_online
+    voice_id: zh-CN-XiaoxiaoNeural
+    prompt_keywords: [活泼, 明快, 播报, 直播]
+    description: 适合轻快播报场景

@@ -4,6 +4,7 @@ import math
 import struct
 import wave
 from pathlib import Path
+from typing import Any
 
 from .base import TtsEngine
 
@@ -23,7 +24,11 @@ class MockTtsEngine(TtsEngine):
         speed: float,
         output_path: Path,
         audio_format: str,
+        mode: str = "text",
         reference_audio_base64: str | None = None,
+        reference_text: str | None = None,
+        prompt_text: str | None = None,
+        mix_voices: list[dict[str, Any]] | None = None,
     ) -> None:
         if audio_format != "wav":
             raise ValueError("mock engine only supports wav")
@@ -33,6 +38,12 @@ class MockTtsEngine(TtsEngine):
         total_frames = int(sample_rate * duration_seconds)
         amplitude = 8000
         frequency = 440.0 if voice_id.endswith("male") else 523.25
+        if mode == "clone" and reference_audio_base64:
+            frequency = 659.25
+        elif mode == "mix" and mix_voices:
+            frequency = 587.33
+        elif mode == "prompt_voice" and prompt_text:
+            frequency = 493.88
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with wave.open(str(output_path), "w") as wav_file:

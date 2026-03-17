@@ -1,87 +1,74 @@
-# CosyVoice 运行记录
+# CosyVoice 接入与一键启动
 
-## 目标
+## 当前方式
 
-让 `/mnt/d/Users/viaco/tools/voice` 的 `/tts` 接口真正调用本地 CosyVoice，而不是 `mock` 的蜂鸣音。
+本仓库不再推荐手工敲长命令。CosyVoice 的接入参数已经收敛到 `config/services.yaml`。
 
-## 当前已验证可用
+默认 provider：`cosyvoice_local`
 
-### 1. 启动 Windows 侧 CosyVoice
+关键配置如下：
 
-```bash
-cd /mnt/d/Users/viaco/PycharmProjects/CosyVoice
-/mnt/d/Users/viaco/PycharmProjects/CosyVoice/.venv/Scripts/python.exe api.py
+```yaml
+providers:
+  cosyvoice_local:
+    engine: cosyvoice_http
+    startup:
+      enabled: true
+      command: /mnt/d/Users/viaco/PycharmProjects/CosyVoice/.venv/Scripts/python.exe api.py
+      cwd: /mnt/d/Users/viaco/PycharmProjects/CosyVoice
+      wait_strategy: sleep
+      wait_seconds: 15
+    options:
+      api_url: http://127.0.0.1:9233/tts
+      clone_api_url: http://127.0.0.1:9233/clone
+      request_mode: form
 ```
 
-说明：
-
-- 监听地址是 `127.0.0.1:9233`
-- 首次启动可能会下载 `wetext` 等附加资源，第一次推理会慢
-
-### 2. 启动 voice 网关
+## 启动网关
 
 ```bash
 cd /mnt/d/Users/viaco/tools/voice
-source .venv/bin/activate
-TTS_ENGINE=cosyvoice_http \
-COSYVOICE_API_URL=http://127.0.0.1:9233/tts \
-uvicorn src.voice_service.main:app --host 0.0.0.0 --port 8000
+./scripts/start_all.sh
 ```
 
-### 3. 健康检查
+当前默认已经启用自动拉起 `CosyVoice`，不需要再额外手工执行 `api.py`。
+
+## 健康检查
 
 ```bash
 curl --noproxy '*' http://127.0.0.1:8000/healthz
+curl --noproxy '*' http://127.0.0.1:8000/providers
+curl --noproxy '*' http://127.0.0.1:8000/voices
 ```
 
-应返回：
-
-```json
-{"status":"ok","engine":"cosyvoice_http"}
-```
-
-### 4. 生成语音
+## 文生语音示例
 
 ```bash
-curl --noproxy '*' -X POST http://127.0.0.1:8000/tts \
+curl --noproxy '*' -X POST http://127.0.0.1:8000/v1/tts \
   -H 'Content-Type: application/json' \
-  -d '{"text":"你好，这是通过voice_service转发到CosyVoice的最终测试。","voice_id":"default_female","speed":1.0,"format":"wav","use_cache":false}'
+  -d '{"text":"你好，这是通过统一网关调用 CosyVoice 的测试。","provider":"cosyvoice_local","mode":"text","voice_id":"default_female","speed":1.0,"format":"wav","use_cache":false}'
 ```
 
-已实测成功生成：
-
-```text
-/mnt/d/Users/viaco/tools/voice/output_audio/ea0536682255e12dfee2d6ef.wav
-```
-
-## 这次修过的坑
-
-- `voice_service` 默认引擎是 `mock`，如果不显式设置 `TTS_ENGINE`，输出只会是“嘟一声”
-- `CosyVoice/api.py` 里 `load_onnx=False` 和当前安装版本不兼容，已修
-- `CosyVoice` 的 yaml 加载链路和当前依赖版本不兼容，已改为 `yaml.FullLoader`
-- WSL 里访问 Windows 的 `127.0.0.1:9233` 不稳定，`voice_service` 已加 Windows `curl.exe` 回退桥接
-
-## 当前注意事项
-
-- CosyVoice 返回的是 float32 wav，不是所有简单播放器都兼容
-- 如果某些工具打不开 wav，不代表合成失败
-- 要求最稳的兼容性时，可以后续再加一步自动转 PCM16
-
-## 备用方案
-
-如果 CosyVoice 临时不可用，可以先切到 `edge_tts`：
+## 克隆音色示例
 
 ```bash
-cd /mnt/d/Users/viaco/tools/voice
-source .venv/bin/activate
-TTS_ENGINE=edge_tts \
-uvicorn src.voice_service.main:app --host 0.0.0.0 --port 8000
-```
-
-然后请求时改用 `mp3`：
-
-```bash
-curl --noproxy '*' -X POST http://127.0.0.1:8000/tts \
+curl --noproxy '*' -X POST http://127.0.0.1:8000/v1/tts \
   -H 'Content-Type: application/json' \
-  -d '{"text":"你好，现在已经切到真实语音引擎。","voice_id":"zh-CN-XiaoxiaoNeural","speed":1.0,"format":"mp3","use_cache":false}'
+  -d '{"text":"这是克隆音色测试。","provider":"cosyvoice_local","mode":"clone","format":"wav","reference_audio_base64":"BASE64_AUDIO","reference_text":"参考音频文本","use_cache":false}'
 ```
+
+## 提示词生成音色示例
+
+```bash
+curl --noproxy '*' -X POST http://127.0.0.1:8000/v1/tts \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"请更温柔地读这句话。","mode":"prompt_voice","prompt_text":"温柔 治愈 故事","format":"wav","use_cache":false}'
+```
+
+## 说明
+
+- `mix` 和 `prompt_voice` 已在网关层标准化
+- 实际效果取决于底层 provider 是否支持对应能力
+- 当前 CosyVoice 本地接入优先保证 `text` 和 `clone` 跑通
+- WSL 下不直接依赖 `127.0.0.1:9233` 探测，网关已内置 Windows `curl.exe` 桥接
+- 如需云端兜底，可在请求中把 `provider` 切到 `edge_online`

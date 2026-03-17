@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 
 from .engines.base import TtsEngine
 from .engines.cosyvoice_http_engine import CosyVoiceHttpEngine
@@ -8,14 +9,20 @@ from .engines.edge_tts_engine import EdgeTtsEngine
 from .engines.mock_engine import MockTtsEngine
 
 
-def build_engine() -> TtsEngine:
-    engine_name = os.getenv("TTS_ENGINE", "mock").strip().lower()
+def build_engine(
+    provider_name: str | None = None,
+    engine_name: str | None = None,
+    options: dict[str, Any] | None = None,
+) -> TtsEngine:
+    del provider_name
+    resolved_engine = (engine_name or os.getenv("TTS_ENGINE", "mock")).strip().lower()
+    resolved_options = options or {}
 
-    if engine_name == "mock":
-        return MockTtsEngine()
-    if engine_name == "edge_tts":
-        return EdgeTtsEngine()
-    if engine_name == "cosyvoice_http":
-        return CosyVoiceHttpEngine()
+    if resolved_engine == "mock":
+        return MockTtsEngine(resolved_options)
+    if resolved_engine == "edge_tts":
+        return EdgeTtsEngine(resolved_options)
+    if resolved_engine == "cosyvoice_http":
+        return CosyVoiceHttpEngine(resolved_options)
 
-    raise ValueError(f"Unsupported TTS_ENGINE: {engine_name}")
+    raise ValueError(f"Unsupported TTS engine: {resolved_engine}")
