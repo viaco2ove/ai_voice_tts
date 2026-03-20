@@ -253,6 +253,7 @@ async def openai_transcriptions(
 async def asr_stream(websocket: WebSocket) -> None:
     await websocket.accept()
     buffer = bytearray()
+    last_partial_text = ""
     provider: str | None = None
     language: str | None = None
     prompt: str | None = None
@@ -284,6 +285,11 @@ async def asr_stream(websocket: WebSocket) -> None:
                             mode="stream",
                         )
                         data = resp.model_dump()
+                        if data.get("text"):
+                            current_text = str(data.get("text") or "")
+                            if current_text.startswith(last_partial_text):
+                                data["text"] = current_text[len(last_partial_text) :].lstrip()
+                            last_partial_text = current_text
                         data["event"] = "partial"
                         data["is_final"] = False
                         await websocket.send_json(data)
@@ -346,6 +352,10 @@ async def asr_stream(websocket: WebSocket) -> None:
                 )
                 data = resp.model_dump()
                 data["event"] = "final"
+                if last_partial_text and data.get("text"):
+                    current_text = str(data.get("text") or "")
+                    if current_text.startswith(last_partial_text):
+                        data["text"] = current_text[len(last_partial_text) :].lstrip()
                 await websocket.send_json(data)
             except Exception as exc:
                 await websocket.send_json({"event": "error", "message": str(exc)})

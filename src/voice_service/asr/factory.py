@@ -5,6 +5,7 @@ from typing import Any
 from .base import AsrEngine
 from .http_asr_engine import HttpAsrEngine
 from .local_whisper_engine import LocalWhisperAsrEngine
+from .vosk_asr_engine import VoskAsrEngine
 from .mock_asr_engine import MockAsrEngine
 
 
@@ -18,5 +19,7 @@ def build_asr_engine(engine_name: str, options: dict[str, Any] | None = None) ->
         return HttpAsrEngine(resolved_options)
     if resolved == "local_whisper":
         return LocalWhisperAsrEngine(resolved_options)
+    if resolved == "vosk":
+        return VoskAsrEngine(resolved_options)
 
     raise ValueError(f"Unsupported ASR engine: {engine_name}")

@@ -142,3 +142,14 @@ asr_providers:
     startup:
       enabled: false
       command: ""
+
+  vosk_local:
+    engine: vosk
+    enabled: false
+    supported_modes: [file, stream]
+    options:
+      model_path: models/vosk
+      sample_rate: 16000
+    startup:
+      enabled: false
+      command: ""

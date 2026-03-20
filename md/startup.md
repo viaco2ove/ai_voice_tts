@@ -20,6 +20,7 @@
 本地 ASR 可选引擎：
 
 - `local_whisper`（基于 `faster-whisper`，需要额外安装依赖与模型下载）
+- `vosk`（支持真正流式识别，需要准备 `models/vosk` 模型目录）
 
 ## 一键启动
 
