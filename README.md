@@ -18,6 +18,11 @@ test
 cd /mnt/d/users/viaco/tools/voice
 ./scripts/start_all.sh
 ```
+or
+
+```bash
+bash --noprofile --norc -c 'cd /mnt/d/users/viaco/tools/voice && source .venv/bin/activate && python -m src.voice_service.launcher --config config/services.yaml'  
+```     
 
 默认配置在 `config/services.yaml`，可切换 provider、端口、启动方式。
 
