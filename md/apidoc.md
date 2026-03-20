@@ -6,6 +6,28 @@
 
 默认入口：`http://127.0.0.1:8000`
 
+
+## 当前提供的接口 
+  - GET /healthz                                                                                                                                                     
+    返回服务健康与当前 provider 概览。                                                                                                                               
+  - GET /providers                                                                                                                                                   
+    返回已启用的 provider 列表、默认音色、支持模式。                                                                                                                 
+  - GET /voices                                                                                                                                                      
+    返回音色预设列表（来自 config/services.yaml）。                                                                                                                  
+  - POST /v1/tts                                                                                                                                                     
+    标准化文生语音接口。                                                                                                                                             
+    支持 mode=text | clone | mix | prompt_voice。                                                                           
+  - POST /v1/tts/clone_upload                                                                                                                                        
+    上传参考音频进行克隆，无需手动转 base64。                                                                                                                        
+    multipart/form-data，字段见 md/apidoc.md。                                                                                                                       
+  - POST /v1/audio/speech                                                                                                                                            
+    OpenAI 兼容接口，返回音频流，不返回 JSON。                                                                                                                       
+    支持 response_format=wav|mp3。                                                                                                                                   
+  - POST /tts                                                                                                                                                        
+    旧接口兼容，字段和之前一致。                                                                                                                                     
+  - GET /audio/{file_name}                                                                                                                                           
+    下载生成的音频文件。                                                                                                                                             
+    
 ## 核心接口
 
 ### 1. 健康检查
@@ -91,6 +113,29 @@ curl --noproxy '*' -X POST http://127.0.0.1:8000/v1/tts/clone_upload \
   -F 'reference_audio=@/abs/path/reference.wav'
 ```
 
+### 6. OpenAI 兼容接口
+
+```http
+POST /v1/audio/speech
+Content-Type: application/json
+```
+
+请求体示例：
+
+```json
+{
+  "model": "tts-1",
+  "input": "这是一段 OpenAI 兼容格式的测试。",
+  "voice": "default_female",
+  "speed": 1.0,
+  "response_format": "wav",
+  "provider": "cosyvoice_local"
+}
+```
+
+该接口直接返回音频文件流，不返回 JSON。
+`response_format` 当前支持 `wav` 或 `mp3`。
+
 ## 支持模式
 
 ### `mode=text`
@@ -150,6 +195,110 @@ POST /tts
 
 ```http
 GET /audio/{file_name}
+```
+
+## 语音识别接口
+
+### 0. 查询 ASR provider 列表
+
+```http
+GET /v1/asr/providers
+```
+
+### 1. 文件识别
+
+```http
+POST /v1/asr
+Content-Type: multipart/form-data
+```
+
+表单字段：
+
+- `audio`: 音频文件
+- `provider`: 可选，默认走 `asr_gateway.default_provider`
+- `language`: 可选
+- `prompt`: 可选
+- `temperature`: 可选
+- `format`: 可选，例如 `wav`、`mp3`
+
+示例：
+
+```bash
+curl --noproxy '*' -X POST http://127.0.0.1:8000/v1/asr \
+  -F 'provider=mock_asr' \
+  -F 'language=zh' \
+  -F 'audio=@/abs/path/audio.wav'
+```
+
+### 2. 边说边识别（WebSocket）
+
+```text
+ws://127.0.0.1:8000/v1/asr/stream
+```
+
+消息协议（JSON）：
+
+- `start`：初始化参数
+- `audio`：传递 `audio_base64` 分片
+- `end`：结束并返回最终结果
+
+`start` 可选字段：
+
+- `partial_interval_ms`: 服务器发送增量结果的最小时间间隔（默认 1000）
+- `min_chunk_bytes`: 触发增量识别的最小累计字节数（默认 32000）
+- `segment_seconds`: 按时间窗口触发增量识别（优先生效）
+- `audio_bytes_per_second`: 估算音频字节率（默认 32000，用于 `segment_seconds` 计算）
+
+示例：
+
+```json
+{"event":"start","provider":"mock_asr","language":"zh","format":"wav"}
+{"event":"audio","audio_base64":"..."}
+{"event":"end"}
+```
+
+返回示例（服务器推送）：
+
+```json
+{"event":"partial","provider":"mock_asr","engine":"mock_asr","text":"mock partial (32000 bytes)","language":"zh","segments":[],"is_final":false}
+{"event":"final","provider":"mock_asr","engine":"mock_asr","text":"mock transcription","language":"zh","segments":[],"is_final":true}
+```
+
+说明：
+
+- 默认实现会在收到 `end` 后返回最终结果
+- 如果后端 ASR provider 支持流式识别并启用 `supports_stream`，会在接收音频时返回增量结果
+- 本地 `local_whisper` 的增量结果是对当前缓存的重复解码，属于“近似流式”
+
+### 3. OpenAI 兼容识别接口
+
+```http
+POST /v1/audio/transcriptions
+Content-Type: multipart/form-data
+```
+
+表单字段：
+
+- `file`: 音频文件
+- `model`: 可选，忽略
+- `language`: 可选
+- `prompt`: 可选
+- `temperature`: 可选
+- `provider`: 可选
+
+示例：
+
+```bash
+curl --noproxy '*' -X POST http://127.0.0.1:8000/v1/audio/transcriptions \
+  -F 'file=@/abs/path/audio.wav' \
+  -F 'language=zh' \
+  -F 'provider=local_whisper'
+```
+
+返回示例：
+
+```json
+{"text":"识别结果文本"}
 ```
 
 ## 错误说明

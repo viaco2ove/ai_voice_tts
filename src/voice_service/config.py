@@ -17,6 +17,11 @@ class GatewayConfig:
 
 
 @dataclass
+class AsrGatewayConfig:
+    default_provider: str = "mock_asr"
+
+
+@dataclass
 class StartupConfig:
     enabled: bool = False
     command: str = ""
@@ -37,6 +42,16 @@ class ProviderConfig:
     default_voice_id: str = "default_female"
     default_format: str = "wav"
     supported_modes: list[str] = field(default_factory=lambda: ["text"])
+    options: dict[str, Any] = field(default_factory=dict)
+    startup: StartupConfig = field(default_factory=StartupConfig)
+
+
+@dataclass
+class AsrProviderConfig:
+    name: str
+    engine: str
+    enabled: bool = True
+    supported_modes: list[str] = field(default_factory=lambda: ["file"])
     options: dict[str, Any] = field(default_factory=dict)
     startup: StartupConfig = field(default_factory=StartupConfig)
 
@@ -68,6 +83,8 @@ class AppConfig:
     providers: dict[str, ProviderConfig]
     voice_presets: list[VoicePreset]
     style_presets: list[StylePreset]
+    asr_gateway: AsrGatewayConfig
+    asr_providers: dict[str, AsrProviderConfig]
 
 
 def _expand_env_values(value: Any) -> Any:
@@ -141,11 +158,39 @@ def load_app_config(path: str | Path) -> AppConfig:
         for item in (data.get("style_presets", []) or [])
     ]
 
+    asr_gateway_data = data.get("asr_gateway", {}) or {}
+    asr_gateway = AsrGatewayConfig(
+        default_provider=str(asr_gateway_data.get("default_provider", "mock_asr")),
+    )
+
+    asr_providers: dict[str, AsrProviderConfig] = {}
+    for name, raw in (data.get("asr_providers", {}) or {}).items():
+        startup_raw = raw.get("startup", {}) or {}
+        asr_providers[name] = AsrProviderConfig(
+            name=name,
+            engine=str(raw["engine"]),
+            enabled=bool(raw.get("enabled", True)),
+            supported_modes=list(raw.get("supported_modes", ["file"])),
+            options=dict(raw.get("options", {})),
+            startup=StartupConfig(
+                enabled=bool(startup_raw.get("enabled", False)),
+                command=str(startup_raw.get("command", "")),
+                cwd=startup_raw.get("cwd"),
+                env=dict(startup_raw.get("env", {})),
+                wait_strategy=str(startup_raw.get("wait_strategy", "none")),
+                wait_seconds=float(startup_raw.get("wait_seconds", 0)),
+                tcp_host=str(startup_raw.get("tcp_host", "127.0.0.1")),
+                tcp_port=startup_raw.get("tcp_port"),
+                startup_timeout_seconds=float(startup_raw.get("startup_timeout_seconds", 180)),
+            ),
+        )
+
     return AppConfig(
         path=config_path,
         gateway=gateway,
         providers=providers,
         voice_presets=voice_presets,
         style_presets=style_presets,
+        asr_gateway=asr_gateway,
+        asr_providers=asr_providers,
     )
-

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import uvicorn
 
-from .config import AppConfig, ProviderConfig, load_app_config
+from .config import AppConfig, AsrProviderConfig, ProviderConfig, load_app_config
 
 
 class VoiceServiceLauncher:
@@ -47,7 +47,24 @@ class VoiceServiceLauncher:
             self.children.append(child)
             self._wait_until_ready(provider, child)
 
-    def _wait_until_ready(self, provider: ProviderConfig, child: subprocess.Popen[str]) -> None:
+        for provider in self.config.asr_providers.values():
+            if not provider.enabled or not provider.startup.enabled or not provider.startup.command.strip():
+                continue
+
+            if self._is_provider_ready(provider) or self._has_matching_process(provider.startup.command):
+                continue
+
+            child = subprocess.Popen(
+                provider.startup.command,
+                cwd=provider.startup.cwd or None,
+                env={**os.environ, **provider.startup.env},
+                shell=True,
+                text=True,
+            )
+            self.children.append(child)
+            self._wait_until_ready(provider, child)
+
+    def _wait_until_ready(self, provider: ProviderConfig | AsrProviderConfig, child: subprocess.Popen[str]) -> None:
         strategy = provider.startup.wait_strategy.lower()
         if strategy == "none":
             return
@@ -66,7 +83,7 @@ class VoiceServiceLauncher:
                 time.sleep(1.0)
             raise RuntimeError(f"{provider.name} 启动超时，端口未就绪: {provider.startup.tcp_host}:{provider.startup.tcp_port}")
 
-    def _is_provider_ready(self, provider: ProviderConfig) -> bool:
+    def _is_provider_ready(self, provider: ProviderConfig | AsrProviderConfig) -> bool:
         strategy = provider.startup.wait_strategy.lower()
         if strategy == "tcp" and provider.startup.tcp_port:
             return self._is_tcp_open(provider.startup.tcp_host, int(provider.startup.tcp_port))

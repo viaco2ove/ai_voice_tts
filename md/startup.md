@@ -14,6 +14,12 @@
 - `providers`: 各语音服务的引擎类型、默认音色、支持模式、上游启动方式
 - `voice_presets`: 对外暴露的音色预设
 - `style_presets`: 提示词到音色的映射规则
+- `asr_gateway`: 语音识别默认 provider
+- `asr_providers`: 语音识别引擎配置
+
+本地 ASR 可选引擎：
+
+- `local_whisper`（基于 `faster-whisper`，需要额外安装依赖与模型下载）
 
 ## 一键启动
 

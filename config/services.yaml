@@ -100,3 +100,45 @@ style_presets:
     voice_id: zh-CN-XiaoxiaoNeural
     prompt_keywords: [活泼, 明快, 播报, 直播]
     description: 适合轻快播报场景
+
+asr_gateway:
+  default_provider: mock_asr
+
+asr_providers:
+  mock_asr:
+    engine: mock_asr
+    enabled: true
+    supported_modes: [file, stream]
+    options: {}
+    startup:
+      enabled: false
+      command: ""
+
+  asr_http:
+    engine: asr_http
+    enabled: false
+    supported_modes: [file, stream]
+    options:
+      api_url: http://127.0.0.1:9000/asr
+      request_mode: json
+      timeout_seconds: 60
+      model: whisper-1
+      supports_stream: false
+    startup:
+      enabled: false
+      command: ""
+
+  local_whisper:
+    engine: local_whisper
+    enabled: false
+    supported_modes: [file]
+    options:
+      model: base
+      device: cpu
+      compute_type: int8
+      vad_filter: true
+      beam_size: 5
+      best_of: 5
+    startup:
+      enabled: false
+      command: ""

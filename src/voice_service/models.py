@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 
 VoiceMode = Literal["text", "clone", "mix", "prompt_voice"]
 AudioFormat = Literal["wav", "mp3"]
+AsrMode = Literal["file", "stream"]
 
 
 class MixVoiceItem(BaseModel):
@@ -89,3 +90,36 @@ class VoicePresetInfo(BaseModel):
     voice_id: str
     modes: list[VoiceMode]
     description: str = ""
+
+
+class OpenAiSpeechRequest(BaseModel):
+    model: str | None = None
+    input: str = Field(min_length=1, max_length=3000)
+    voice: str | None = None
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    response_format: AudioFormat = "wav"
+    provider: str | None = None
+    use_cache: bool = True
+
+
+class AsrSegment(BaseModel):
+    start: float | None = None
+    end: float | None = None
+    text: str
+    confidence: float | None = None
+
+
+class AsrResponse(BaseModel):
+    provider: str
+    engine: str
+    text: str
+    language: str | None = None
+    segments: list[dict] | list[AsrSegment] = Field(default_factory=list)
+    is_final: bool = True
+
+
+class AsrProviderInfo(BaseModel):
+    provider: str
+    engine: str
+    enabled: bool
+    supported_modes: list[AsrMode]
