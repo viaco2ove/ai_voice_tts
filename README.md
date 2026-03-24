@@ -13,18 +13,36 @@ test
 - YAML 配置驱动，支持自动拉起上游服务
 
 ## 快速启动
-
+### windows
 ```bash
-cd /mnt/d/users/viaco/tools/voice
-./scripts/start_all.sh
+cd D:\Users\viaco\PycharmProjects\CosyVoice
+.venv\Scripts\activate
+pip install -r requirements.txt
 ```
-or
 
 ```bash
-bash --noprofile --norc -c 'cd /mnt/d/users/viaco/tools/voice && source .venv/bin/activate && python -m src.voice_service.launcher --config config/services.yaml'  
-```     
+python.exe api.py
+```
+
+### wsl
+```bash
+cd /mnt/d/Users/viaco/tools/voice                                                                                                               
+source .venv/bin/activate    
+pip install -r requirements.txt
+```
+
+```bash                                                                                                        
+export PYTHONPATH=$PWD                                                                                                                          
+VOICE_CONFIG_PATH=config/services.yaml uvicorn src.voice_service.main:app --host 0.0.0.0 --port 8000  
+```
+
+[run.md](md/run.md)
 
 默认配置在 `config/services.yaml`，可切换 provider、端口、启动方式。
+
+降级wetext 代表缺包
+需要
+pip install -r requirements.txt
 
 ## 配置示例
 
