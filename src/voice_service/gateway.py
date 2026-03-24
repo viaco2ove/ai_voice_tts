@@ -175,14 +175,27 @@ class TtsGateway:
 
         preset = self._find_voice_preset(resolved_voice_id)
         if preset:
-            provider_name = req.provider or preset.provider
-            resolved_voice_id = preset.voice_id
+            preset_provider = self.providers.get(preset.provider)
+            if not (
+                req.mode == "clone"
+                and preset_provider
+                and req.mode not in preset_provider.supported_modes
+            ):
+                provider_name = req.provider or preset.provider
+                resolved_voice_id = preset.voice_id
 
         provider = self.providers.get(provider_name)
         if not provider:
             raise ValueError(f"provider 不存在或未启用: {provider_name}")
+        if req.mode == "clone" and req.mode not in provider.supported_modes:
+            provider = self._find_fallback_provider(req.mode)
+            provider_name = provider.name
+            if not self._voice_matches_provider(resolved_voice_id, provider_name):
+                resolved_voice_id = provider.default_voice_id
         if req.mode not in provider.supported_modes:
             raise ValueError(f"provider={provider.name} 不支持 mode={req.mode}")
+        if req.mode == "clone" and not self._voice_matches_provider(resolved_voice_id, provider.name):
+            resolved_voice_id = provider.default_voice_id
 
         if req.mode == "prompt_voice" and not resolved_voice_id:
             inferred_voice_id = self._infer_voice_from_prompt(provider.name, req.prompt_text or "")
@@ -194,6 +207,23 @@ class TtsGateway:
         if not resolved_voice_id:
             raise ValueError("未解析到 voice_id")
         return provider, resolved_voice_id
+
+    def _find_fallback_provider(self, mode: str) -> ProviderConfig:
+        default_provider = self.providers.get(self.config.gateway.default_provider)
+        if default_provider and mode in default_provider.supported_modes:
+            return default_provider
+        for provider in self.providers.values():
+            if mode in provider.supported_modes:
+                return provider
+        raise ValueError(f"没有可用 provider 支持 mode={mode}")
+
+    def _voice_matches_provider(self, voice_id: str, provider_name: str) -> bool:
+        if not voice_id:
+            return False
+        preset = self._find_voice_preset(voice_id)
+        if preset:
+            return preset.provider == provider_name
+        return True
 
     def _find_voice_preset(self, voice_or_preset_id: str) -> VoicePreset | None:
         for item in self.config.voice_presets:

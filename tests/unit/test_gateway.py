@@ -27,7 +27,7 @@ class PromptVoiceFallbackTests(unittest.TestCase):
                     engine="mock",
                     default_voice_id="default_female",
                     default_format="wav",
-                    supported_modes=["text", "prompt_voice"],
+                    supported_modes=["text", "clone", "prompt_voice"],
                     options={"instruct_api_url": "http://127.0.0.1:9233/instruct"},
                     startup=StartupConfig(),
                 ),
@@ -61,6 +61,13 @@ class PromptVoiceFallbackTests(unittest.TestCase):
                     provider="edge_online",
                     voice_id="zh-CN-XiaoxiaoNeural",
                     description="云端中文女声",
+                ),
+                VoicePreset(
+                    id="edge_yunxi",
+                    label="Edge 云希",
+                    provider="edge_online",
+                    voice_id="zh-CN-YunxiNeural",
+                    description="云端中文男声",
                 ),
             ],
             style_presets=[
@@ -167,3 +174,31 @@ class PromptVoiceFallbackTests(unittest.TestCase):
         resolved_format = gateway._resolve_output_format(provider, "wav")
 
         self.assertEqual(resolved_format, "mp3")
+
+    def test_clone_mode_falls_back_from_edge_provider_to_clone_capable_provider(self) -> None:
+        gateway = self._build_gateway()
+        req = StandardTtsRequest(
+            text="这是克隆测试。",
+            provider="edge_online",
+            mode="clone",
+            reference_audio_base64="BASE64_AUDIO",
+        )
+
+        provider, resolved_voice_id = gateway._resolve_provider_and_voice(req)
+
+        self.assertEqual(provider.name, "cosyvoice_local")
+        self.assertEqual(resolved_voice_id, "default_female")
+
+    def test_clone_mode_ignores_edge_voice_preset_and_uses_clone_capable_provider(self) -> None:
+        gateway = self._build_gateway()
+        req = StandardTtsRequest(
+            text="这是克隆测试。",
+            voice_id="edge_yunxi",
+            mode="clone",
+            reference_audio_base64="BASE64_AUDIO",
+        )
+
+        provider, resolved_voice_id = gateway._resolve_provider_and_voice(req)
+
+        self.assertEqual(provider.name, "cosyvoice_local")
+        self.assertEqual(resolved_voice_id, "default_female")

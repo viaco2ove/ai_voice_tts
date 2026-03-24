@@ -174,6 +174,12 @@ Content-Type: application/json
 ### `mode=clone`
 需要 `reference_audio_base64`，可选 `reference_text`。
 
+补充规则：
+
+- `clone` 只会落到支持克隆的 provider
+- 如果前端误传了 `provider=edge_online`，或者带了 `edge_xiaoxiao / edge_yunxi` 这类不支持克隆的音色，网关会自动回退到支持 `clone` 的 provider，而不是直接返回 `400`
+- 当前默认配置下，这个回退目标就是 `cosyvoice_local`
+
 ```json
 {
   "text": "用参考音频克隆这个声音。",
