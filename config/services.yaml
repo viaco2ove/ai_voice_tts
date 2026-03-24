@@ -86,19 +86,19 @@ style_presets:
     label: 温柔讲述
     provider: cosyvoice_local
     voice_id: default_female
-    prompt_keywords: [温柔, 治愈, 讲述, 故事]
+    prompt_keywords: [温柔, 治愈, 讲述, 故事, 柔和, 温暖, 细腻, 抒情]
     description: 适合故事解说、情绪平稳内容
   - id: steady_male
     label: 沉稳男声
     provider: cosyvoice_local
     voice_id: default_male
-    prompt_keywords: [沉稳, 纪录片, 说明, 男声]
+    prompt_keywords: [沉稳, 纪录片, 说明, 男声, 男性, 磁性, 口播, 坚定, 干练]
     description: 适合纪录片旁白和口播
   - id: bright_stream
     label: 明快播报
     provider: edge_online
     voice_id: zh-CN-XiaoxiaoNeural
-    prompt_keywords: [活泼, 明快, 播报, 直播]
+    prompt_keywords: [活泼, 明快, 播报, 直播, 明亮, 自信, 朝气, 有力, 爽朗]
     description: 适合轻快播报场景
 
 asr_gateway:

@@ -202,23 +202,34 @@ Content-Type: application/json
 ```
 
 ### `mode=prompt_voice`
-通过提示词映射到配置中的 `style_presets`。
+通过提示词把请求路由到更合适的 `style_presets` / `voice_id`。这是“规则打分式风格路由”，不是底层模型直接理解整段提示词。
 
 匹配规则：
 
-- 网关会在 `config/services.yaml` 的 `style_presets` 中做关键词包含匹配
-- 命中分数最高的 style 会决定最终的 `provider` 和 `voice_id`
-- 当前默认关键词包括：`温柔`、`治愈`、`讲述`、`故事`、`沉稳`、`纪录片`、`说明`、`男声`、`活泼`、`明快`、`播报`、`直播`
-- 如果 `prompt_text` 没有命中任何 style，不再直接报错，而是按下面顺序回退：
+- 先做标准化：统一大小写、去掉常见标点和多余空白
+- 第一优先级是直接命中：`style id`、`style label`、`prompt_keywords`
+- 第二优先级是语义信号打分：当前内置会识别 `male / female / gentle / story / steady / bright / broadcast` 这几类信号
+- 默认信号词示例：
+- `male`：`男声`、`男性`、`男生`、`青年男性`
+- `female`：`女声`、`女性`、`女生`、`御姐`
+- `gentle`：`温柔`、`治愈`、`柔和`、`温暖`
+- `story`：`故事`、`讲述`、`叙述`、`旁白`
+- `steady`：`沉稳`、`纪录片`、`说明`、`口播`、`坚定`、`干练`
+- `bright`：`活泼`、`明快`、`明亮`、`朝气`、`自信`、`有力`
+- `broadcast`：`播报`、`直播`、`主持`、`主播`
+- style 分数最高且大于 0 时，最终采用这个 style 对应的 `provider` 和 `voice_id`
+- 如果提示词带有明显性别信号，但没有 style 命中，网关会优先在当前 provider 下推断更合适的男女声
+- 如果仍然无法推断，则按下面顺序回退：
 - 先使用请求体中的 `voice_id`
 - 如果没有 `voice_id`，使用请求体中的 `provider` 对应默认音色
 - 如果也没有 `provider`，使用网关默认 provider 的默认音色
 
 建议：
 
-- `prompt_voice` 适合“风格路由”，不是任意自然语言都能精确控制底层模型
-- 如果前端传的是自由描述文本，建议同时传 `provider`，必要时再传 `voice_id`，这样即使未命中 style 也不会失败
-- 如果希望特定提示词稳定命中，请把关键词补到 `config/services.yaml` 的 `style_presets.prompt_keywords`
+- `prompt_voice` 更适合“选风格 / 选音色方向”，不适合要求底层模型逐字理解复杂人设文案
+- 长段自然语言可以用，但真正起作用的是其中能命中的信号词，比如“男声 / 温柔 / 干练 / 明亮 / 播报 / 故事”
+- 如果前端传的是自由描述文本，建议同时传 `provider`，必要时再传 `voice_id`
+- 如果你希望某一类表达稳定命中，请继续在 `config/services.yaml` 的 `style_presets.prompt_keywords` 里补关键词
 
 ```json
 {
@@ -228,6 +239,18 @@ Content-Type: application/json
   "format": "wav"
 }
 ```
+
+像下面这种自由描述提示词：
+
+```json
+{
+  "text": "你好，欢迎见到你。",
+  "mode": "prompt_voice",
+  "prompt_text": "一位干练明亮有力的青年男性，语调张扬自信，语速偏快，语调洪亮，充满活力与朝气，口吻坚定果决。"
+}
+```
+
+当前规则不会逐字理解整段人设，但会从中提取 `male / bright / steady` 相关信号，优先路由到更贴近“男声、干练、明亮”的 style 或 voice。
 
 未命中 style 时的兜底示例：
 

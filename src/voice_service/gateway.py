@@ -1,11 +1,23 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 
 from .config import AppConfig, ProviderConfig, StylePreset, VoicePreset
 from .engine_factory import build_engine
 from .models import ProviderInfo, StandardTtsRequest, TtsResponse, VoicePresetInfo
+
+
+SIGNAL_TERMS: dict[str, tuple[str, ...]] = {
+    "male": ("男声", "男性", "男生", "男", "青年男性", "青年男", "少年感", "磁性男"),
+    "female": ("女声", "女性", "女生", "女", "少女", "御姐", "甜妹"),
+    "gentle": ("温柔", "治愈", "柔和", "轻柔", "温暖", "暖心", "细腻", "抒情"),
+    "story": ("故事", "讲述", "叙述", "娓娓道来", "旁白"),
+    "steady": ("沉稳", "稳重", "成熟", "纪录片", "说明", "口播", "专业", "坚定", "果决", "磁性", "低沉", "干练"),
+    "bright": ("活泼", "明快", "明亮", "清亮", "轻快", "朝气", "元气", "年轻", "青年", "张扬", "自信", "热情", "有力", "爽朗"),
+    "broadcast": ("播报", "直播", "主持", "主播", "口播"),
+}
 
 
 class TtsGateway:
@@ -146,6 +158,11 @@ class TtsGateway:
         if req.mode not in provider.supported_modes:
             raise ValueError(f"provider={provider.name} 不支持 mode={req.mode}")
 
+        if req.mode == "prompt_voice" and not resolved_voice_id:
+            inferred_voice_id = self._infer_voice_from_prompt(provider.name, req.prompt_text or "")
+            if inferred_voice_id:
+                resolved_voice_id = inferred_voice_id
+
         if not resolved_voice_id:
             resolved_voice_id = provider.default_voice_id
         if not resolved_voice_id:
@@ -154,20 +171,98 @@ class TtsGateway:
 
     def _find_voice_preset(self, voice_or_preset_id: str) -> VoicePreset | None:
         for item in self.config.voice_presets:
-            if item.id == voice_or_preset_id:
+            if item.id == voice_or_preset_id or item.voice_id == voice_or_preset_id:
                 return item
         return None
 
     def _resolve_style_preset(self, prompt_text: str) -> StylePreset | None:
-        prompt_text = prompt_text.strip().lower()
+        prompt_text = self._normalize_text(prompt_text)
         if not prompt_text:
             return None
 
-        best_match: tuple[int, StylePreset] | None = None
+        best_match: tuple[int, int, StylePreset] | None = None
         for item in self.config.style_presets:
-            score = sum(1 for keyword in item.prompt_keywords if keyword.strip().lower() in prompt_text)
+            score, direct_hits = self._score_style_preset(prompt_text, item)
+            if score <= 0:
+                continue
+            if best_match is None or (score, direct_hits) > (best_match[0], best_match[1]):
+                best_match = (score, direct_hits, item)
+        return best_match[2] if best_match else None
+
+    def _score_style_preset(self, prompt_text: str, item: StylePreset) -> tuple[int, int]:
+        style_text = self._style_search_text(item)
+        prompt_groups = self._extract_signal_groups(prompt_text)
+        style_groups = self._extract_signal_groups(style_text)
+
+        score = 0
+        direct_hits = 0
+
+        normalized_id = self._normalize_text(item.id)
+        normalized_label = self._normalize_text(item.label)
+        if normalized_id and normalized_id in prompt_text:
+            score += 8
+            direct_hits += 1
+        if normalized_label and normalized_label in prompt_text:
+            score += 10
+            direct_hits += 1
+
+        for keyword in item.prompt_keywords:
+            normalized_keyword = self._normalize_text(keyword)
+            if normalized_keyword and normalized_keyword in prompt_text:
+                score += 6
+                direct_hits += 1
+
+        score += 3 * len(prompt_groups & style_groups)
+
+        if "male" in prompt_groups and "female" in style_groups:
+            score -= 6
+        if "female" in prompt_groups and "male" in style_groups:
+            score -= 6
+
+        return score, direct_hits
+
+    def _infer_voice_from_prompt(self, provider_name: str, prompt_text: str) -> str | None:
+        prompt_groups = self._extract_signal_groups(self._normalize_text(prompt_text))
+        if "male" not in prompt_groups and "female" not in prompt_groups:
+            return None
+
+        preferred_gender = "male" if "male" in prompt_groups and "female" not in prompt_groups else None
+        if preferred_gender is None and "female" in prompt_groups and "male" not in prompt_groups:
+            preferred_gender = "female"
+        if preferred_gender is None:
+            return None
+
+        best_match: tuple[int, VoicePreset] | None = None
+        for item in self.config.voice_presets:
+            if item.provider != provider_name:
+                continue
+            voice_groups = self._extract_signal_groups(self._voice_search_text(item))
+            score = 0
+            if preferred_gender in voice_groups:
+                score += 4
+            if preferred_gender == "male" and "female" in voice_groups:
+                score -= 4
+            if preferred_gender == "female" and "male" in voice_groups:
+                score -= 4
             if score <= 0:
                 continue
             if best_match is None or score > best_match[0]:
                 best_match = (score, item)
-        return best_match[1] if best_match else None
+        return best_match[1].voice_id if best_match else None
+
+    def _style_search_text(self, item: StylePreset) -> str:
+        parts = [item.id, item.label, item.description, *item.prompt_keywords]
+        bound_voice = self._find_voice_preset(item.voice_id)
+        if bound_voice:
+            parts.extend([bound_voice.label, bound_voice.voice_id, bound_voice.description])
+        return self._normalize_text(" ".join(parts))
+
+    def _voice_search_text(self, item: VoicePreset) -> str:
+        return self._normalize_text(" ".join([item.id, item.label, item.voice_id, item.description]))
+
+    def _extract_signal_groups(self, text: str) -> set[str]:
+        return {group for group, terms in SIGNAL_TERMS.items() if any(term in text for term in terms)}
+
+    def _normalize_text(self, value: str) -> str:
+        normalized = re.sub(r"[\s,，。！？；：、/|()（）<>《》【】\\[\\]\"'“”‘’_-]+", " ", value.lower()).strip()
+        return re.sub(r"\s+", " ", normalized)
