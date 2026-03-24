@@ -2,6 +2,7 @@
 test
 一个可配置的一体化语音网关，统一管理文生语音（TTS）与语音识别（ASR），支持一键启动、标准化接口与 OpenAI 兼容接口。
 
+[apidoc.md](md/apidoc.md)
 ## 功能概览
 
 - TTS 标准化接口 `/v1/tts`，支持 `text | clone | mix | prompt_voice`

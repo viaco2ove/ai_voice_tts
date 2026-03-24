@@ -48,6 +48,36 @@ GET /providers
 GET /voices
 ```
 
+当前默认配置下的预设音色：
+
+- `default_female`：默认中文女声，provider=`cosyvoice_local`，支持 `text / clone / mix / prompt_voice`
+- `default_male`：默认中文男声，provider=`cosyvoice_local`，支持 `text / clone / mix / prompt_voice`
+- `edge_xiaoxiao`：Edge 晓晓，provider=`edge_online`，支持 `text / mix / prompt_voice`
+- `edge_yunxi`：Edge 云希，provider=`edge_online`，支持 `text / mix / prompt_voice`
+
+返回示例：
+
+```json
+[
+  {
+    "id": "default_female",
+    "label": "默认中文女声",
+    "provider": "cosyvoice_local",
+    "voice_id": "default_female",
+    "modes": ["text", "clone", "mix", "prompt_voice"],
+    "description": "默认中文女声，适合通用播报"
+  },
+  {
+    "id": "default_male",
+    "label": "默认中文男声",
+    "provider": "cosyvoice_local",
+    "voice_id": "default_male",
+    "modes": ["text", "clone", "mix", "prompt_voice"],
+    "description": "默认中文男声，适合说明类内容"
+  }
+]
+```
+
 ### 4. 标准文生语音接口
 
 ```http
@@ -174,6 +204,22 @@ Content-Type: application/json
 ### `mode=prompt_voice`
 通过提示词映射到配置中的 `style_presets`。
 
+匹配规则：
+
+- 网关会在 `config/services.yaml` 的 `style_presets` 中做关键词包含匹配
+- 命中分数最高的 style 会决定最终的 `provider` 和 `voice_id`
+- 当前默认关键词包括：`温柔`、`治愈`、`讲述`、`故事`、`沉稳`、`纪录片`、`说明`、`男声`、`活泼`、`明快`、`播报`、`直播`
+- 如果 `prompt_text` 没有命中任何 style，不再直接报错，而是按下面顺序回退：
+- 先使用请求体中的 `voice_id`
+- 如果没有 `voice_id`，使用请求体中的 `provider` 对应默认音色
+- 如果也没有 `provider`，使用网关默认 provider 的默认音色
+
+建议：
+
+- `prompt_voice` 适合“风格路由”，不是任意自然语言都能精确控制底层模型
+- 如果前端传的是自由描述文本，建议同时传 `provider`，必要时再传 `voice_id`，这样即使未命中 style 也不会失败
+- 如果希望特定提示词稳定命中，请把关键词补到 `config/services.yaml` 的 `style_presets.prompt_keywords`
+
 ```json
 {
   "text": "请用更温柔的故事感来读。",
@@ -182,6 +228,21 @@ Content-Type: application/json
   "format": "wav"
 }
 ```
+
+未命中 style 时的兜底示例：
+
+```json
+{
+  "text": "请更自然一点。",
+  "provider": "cosyvoice_local",
+  "voice_id": "default_female",
+  "mode": "prompt_voice",
+  "prompt_text": "自然 亲切 日常对话",
+  "format": "wav"
+}
+```
+
+上面这类请求即使没有命中任何 `style_presets`，也会回退到 `cosyvoice_local/default_female` 继续合成，不再返回 `400`。
 
 ## 兼容旧接口
 
@@ -305,6 +366,7 @@ curl --noproxy '*' -X POST http://127.0.0.1:8000/v1/audio/transcriptions \
 ## 错误说明
 
 - `400`: 参数不合法，或 provider 不支持当前模式
+- `prompt_voice` 在当前版本下，提示词未命中 style 时会自动回退，不再因为“未匹配到 style_presets”单独报错
 - `404`: 音频文件不存在
 
 ## 建议

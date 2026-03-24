@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -17,17 +18,21 @@ class VoiceServiceLauncher:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
         self.children: list[subprocess.Popen[str]] = []
+        self.logs_dir = self._resolve_logs_dir()
 
     def run(self) -> None:
         self._register_signals()
-        self._start_upstreams()
-        os.environ["VOICE_CONFIG_PATH"] = str(self.config.path)
-        uvicorn.run(
-            "src.voice_service.main:app",
-            host=self.config.gateway.host,
-            port=self.config.gateway.port,
-            reload=False,
-        )
+        try:
+            self._start_upstreams()
+            os.environ["VOICE_CONFIG_PATH"] = str(self.config.path)
+            uvicorn.run(
+                "src.voice_service.main:app",
+                host=self.config.gateway.host,
+                port=self.config.gateway.port,
+                reload=False,
+            )
+        finally:
+            self._shutdown_children()
 
     def _start_upstreams(self) -> None:
         for provider in self.config.providers.values():
@@ -37,13 +42,7 @@ class VoiceServiceLauncher:
             if self._is_provider_ready(provider) or self._has_matching_process(provider.startup.command):
                 continue
 
-            child = subprocess.Popen(
-                provider.startup.command,
-                cwd=provider.startup.cwd or None,
-                env={**os.environ, **provider.startup.env},
-                shell=True,
-                text=True,
-            )
+            child = self._spawn_child_process(provider.name, provider.startup.command, provider.startup.cwd, provider.startup.env)
             self.children.append(child)
             self._wait_until_ready(provider, child)
 
@@ -54,15 +53,42 @@ class VoiceServiceLauncher:
             if self._is_provider_ready(provider) or self._has_matching_process(provider.startup.command):
                 continue
 
-            child = subprocess.Popen(
-                provider.startup.command,
-                cwd=provider.startup.cwd or None,
-                env={**os.environ, **provider.startup.env},
-                shell=True,
-                text=True,
-            )
+            child = self._spawn_child_process(provider.name, provider.startup.command, provider.startup.cwd, provider.startup.env)
             self.children.append(child)
             self._wait_until_ready(provider, child)
+
+    def _spawn_child_process(
+        self,
+        name: str,
+        command: str,
+        cwd: str | None,
+        extra_env: dict[str, str],
+    ) -> subprocess.Popen[str]:
+        log_path = self._build_log_path(name)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8", buffering=1) as log_file:
+            child = subprocess.Popen(
+                command,
+                cwd=cwd or None,
+                env={**os.environ, **extra_env},
+                shell=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+            )
+        print(f"[launcher] {name} 日志写入 {log_path}")
+        return child
+
+    def _build_log_path(self, name: str) -> Path:
+        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("._") or "service"
+        return self.logs_dir / f"{safe_name}.log"
+
+    def _resolve_logs_dir(self) -> Path:
+        config_dir = self.config.path.parent
+        if config_dir.name == "config":
+            return config_dir.parent / "logs"
+        return Path.cwd() / "logs"
 
     def _wait_until_ready(self, provider: ProviderConfig | AsrProviderConfig, child: subprocess.Popen[str]) -> None:
         strategy = provider.startup.wait_strategy.lower()

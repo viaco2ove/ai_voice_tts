@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import time
 from pathlib import Path
+from typing import NoReturn
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import FileResponse
@@ -25,6 +27,7 @@ from .models import (
 
 
 DEFAULT_CONFIG_PATH = Path(os.getenv("VOICE_CONFIG_PATH", "config/services.yaml")).expanduser()
+LOGGER = logging.getLogger("uvicorn.error")
 
 
 def _build_fallback_config() -> AppConfig:
@@ -81,6 +84,15 @@ def _attach_audio_url(resp: TtsResponse, request: Request) -> TtsResponse:
     return resp
 
 
+def _log_runtime_error(endpoint: str, exc: Exception) -> None:
+    LOGGER.warning("%s failed: %s", endpoint, exc)
+
+
+def _raise_bad_request(endpoint: str, exc: Exception) -> NoReturn:
+    _log_runtime_error(endpoint, exc)
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 CONFIG = load_runtime_config()
 GATEWAY = TtsGateway(CONFIG)
 ASR_GATEWAY = AsrGateway(CONFIG)
@@ -115,7 +127,7 @@ async def synthesize_v1(req: StandardTtsRequest, request: Request) -> TtsRespons
         resp = await GATEWAY.synthesize(req)
         return _attach_audio_url(resp, request)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_bad_request("POST /v1/tts", exc)
 
 
 @app.post("/v1/tts/clone_upload", response_model=TtsResponse)
@@ -146,7 +158,7 @@ async def synthesize_clone_upload(
         resp = await GATEWAY.synthesize(req)
         return _attach_audio_url(resp, request)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_bad_request("POST /v1/tts/clone_upload", exc)
 
 
 @app.post("/tts", response_model=TtsResponse)
@@ -155,7 +167,7 @@ async def synthesize_legacy(req: LegacyTtsRequest, request: Request) -> TtsRespo
         resp = await GATEWAY.synthesize(req.to_standard())
         return _attach_audio_url(resp, request)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_bad_request("POST /tts", exc)
 
 
 @app.post("/v1/audio/speech")
@@ -179,7 +191,7 @@ async def openai_speech(req: OpenAiSpeechRequest) -> FileResponse:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_bad_request("POST /v1/audio/speech", exc)
 
 
 def _normalize_audio_format(value: str | None, filename: str | None) -> str | None:
@@ -216,7 +228,7 @@ async def asr_file(
             mode="file",
         )
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_bad_request("POST /v1/asr", exc)
 
 
 @app.post("/v1/audio/transcriptions")
@@ -246,7 +258,7 @@ async def openai_transcriptions(
         )
         return {"text": resp.text}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_bad_request("POST /v1/audio/transcriptions", exc)
 
 
 @app.websocket("/v1/asr/stream")
@@ -296,6 +308,7 @@ async def asr_stream(websocket: WebSocket) -> None:
                         last_partial_size = len(buffer)
                         last_partial_ts = now
                     except Exception as exc:
+                        _log_runtime_error("WS /v1/asr/stream partial", exc)
                         await websocket.send_json({"event": "error", "message": str(exc)})
             continue
         if "text" not in message or message["text"] is None:
@@ -358,6 +371,7 @@ async def asr_stream(websocket: WebSocket) -> None:
                         data["text"] = current_text[len(last_partial_text) :].lstrip()
                 await websocket.send_json(data)
             except Exception as exc:
+                _log_runtime_error("WS /v1/asr/stream final", exc)
                 await websocket.send_json({"event": "error", "message": str(exc)})
             await websocket.close()
             return

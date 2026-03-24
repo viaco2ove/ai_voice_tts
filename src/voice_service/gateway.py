@@ -125,10 +125,11 @@ class TtsGateway:
 
         if req.mode == "prompt_voice":
             style = self._resolve_style_preset(req.prompt_text or "")
-            if not style:
-                raise ValueError("未找到可匹配的提示词音色，请在配置文件中补充 style_presets")
-            provider_name = style.provider
-            resolved_voice_id = style.voice_id
+            # prompt_voice 优先命中 style_presets；未命中时回退到请求参数或默认音色，
+            # 避免前端因为提示词不精确而直接收到 400。
+            if style:
+                provider_name = style.provider
+                resolved_voice_id = style.voice_id
 
         if req.mode == "mix":
             dominant = max(req.mix_voices, key=lambda item: item.weight)
