@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import subprocess
 import urllib.error
 import urllib.parse
@@ -16,6 +17,56 @@ from .base import TtsEngine
 
 class CosyVoiceHttpEngine(TtsEngine):
     """Call a local/remote CosyVoice-compatible HTTP endpoint."""
+
+    INSTRUCT_TERM_MAP: tuple[tuple[str, str], ...] = (
+        ("青年男性", "young adult male"),
+        ("青年男", "young male"),
+        ("男性", "male"),
+        ("男声", "male voice"),
+        ("男生", "young male"),
+        ("青年女性", "young adult female"),
+        ("青年女", "young female"),
+        ("女性", "female"),
+        ("女声", "female voice"),
+        ("女生", "young female"),
+        ("神话英雄", "mythic hero"),
+        ("英雄", "heroic"),
+        ("朝气", "energetic"),
+        ("元气", "energetic"),
+        ("自信", "confident"),
+        ("有力", "powerful"),
+        ("张扬", "flamboyant"),
+        ("干练", "crisp and capable"),
+        ("坚定", "determined"),
+        ("沉稳", "steady"),
+        ("稳重", "steady"),
+        ("成熟", "mature"),
+        ("磁性", "magnetic"),
+        ("低沉", "deep"),
+        ("温柔", "gentle"),
+        ("治愈", "soothing"),
+        ("温暖", "warm"),
+        ("细腻", "delicate"),
+        ("抒情", "lyrical"),
+        ("故事", "storytelling"),
+        ("讲述", "storytelling"),
+        ("叙述", "narrative"),
+        ("旁白", "narrative"),
+        ("纪录片", "documentary narrator"),
+        ("说明", "explanatory"),
+        ("口播", "voice-over"),
+        ("播报", "broadcast"),
+        ("直播", "live host"),
+        ("主持", "host-like"),
+        ("活泼", "playful"),
+        ("明快", "lively"),
+        ("明亮", "bright"),
+        ("爽朗", "cheerful"),
+        ("洪亮", "resonant"),
+        ("语速偏快", "fast-paced"),
+        ("语速快", "fast-paced"),
+        ("偏快", "fast-paced"),
+    )
 
     @property
     def name(self) -> str:
@@ -195,10 +246,75 @@ class CosyVoiceHttpEngine(TtsEngine):
             return payload
         if mode == "prompt_voice":
             payload["role"] = self._map_voice_id(voice_id)
-            payload["prompt_text"] = (prompt_text or "").strip()
+            payload["prompt_text"] = self._compile_instruct_prompt(prompt_text or "", voice_id)
             return payload
         payload["role"] = self._map_voice_id(voice_id)
         return payload
+
+    def _compile_instruct_prompt(self, prompt_text: str, voice_id: str) -> str:
+        prompt_text = (prompt_text or "").strip()
+        if not prompt_text:
+            return ""
+
+        # CosyVoice-300M-Instruct 对中文关键词串容易直接复读。这里改写成更接近
+        # 官方示例的英文 persona 描述，降低把提示词本身读出来的概率。
+        if not self._contains_cjk(prompt_text):
+            return prompt_text
+
+        traits: list[str] = []
+        normalized = re.sub(r"\s+", "", prompt_text)
+        for source, target in self.INSTRUCT_TERM_MAP:
+            if source in normalized and target not in traits:
+                traits.append(target)
+        traits = self._dedupe_overlapping_traits(traits)
+
+        fallback_role = self._english_role_hint(voice_id)
+        if fallback_role and fallback_role not in traits and not self._traits_imply_gender(traits, fallback_role):
+            traits.insert(0, fallback_role)
+
+        if not traits:
+            return f"{fallback_role}, natural, expressive." if fallback_role else "natural, expressive."
+
+        return f"{', '.join(traits)}."
+
+    def _contains_cjk(self, value: str) -> bool:
+        return any("\u4e00" <= ch <= "\u9fff" for ch in value)
+
+    def _english_role_hint(self, voice_id: str) -> str:
+        normalized = voice_id.strip().lower()
+        if "male" in normalized or normalized.endswith("男"):
+            return "male voice"
+        if "female" in normalized or normalized.endswith("女"):
+            return "female voice"
+        return ""
+
+    def _traits_imply_gender(self, traits: list[str], fallback_role: str) -> bool:
+        if fallback_role == "male voice":
+            return any("male" in item for item in traits)
+        if fallback_role == "female voice":
+            return any("female" in item for item in traits)
+        return False
+
+    def _dedupe_overlapping_traits(self, traits: list[str]) -> list[str]:
+        deduped = list(traits)
+        if "young adult male" in deduped:
+            deduped = [item for item in deduped if item not in {"young male", "male", "male voice"}]
+            deduped.insert(0, "young adult male")
+        elif "young male" in deduped:
+            deduped = [item for item in deduped if item not in {"male", "male voice"}]
+            deduped.insert(0, "young male")
+        elif "male" in deduped and "male voice" in deduped:
+            deduped = [item for item in deduped if item != "male voice"]
+
+        if "young adult female" in deduped:
+            deduped = [item for item in deduped if item not in {"young female", "female", "female voice"}]
+            deduped.insert(0, "young adult female")
+        elif "young female" in deduped:
+            deduped = [item for item in deduped if item not in {"female", "female voice"}]
+            deduped.insert(0, "young female")
+        elif "female" in deduped and "female voice" in deduped:
+            deduped = [item for item in deduped if item != "female voice"]
+        return list(dict.fromkeys(deduped))
 
     def _map_voice_id(self, voice_id: str) -> str:
         custom = self.options.get("voice_mapping", {})

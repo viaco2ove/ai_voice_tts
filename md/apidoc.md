@@ -206,7 +206,7 @@ Content-Type: application/json
 
 | provider | `prompt_text` 怎么处理 | 是否是真提示控制 | 备注 |
 | --- | --- | --- | --- |
-| `cosyvoice_local` | 网关先解析提示词，辅助选择更合适的基础音色；随后把 `prompt_text` 继续透传给 CosyVoice `/instruct` | 是 | 当前默认 provider |
+| `cosyvoice_local` | 网关先解析提示词，辅助选择更合适的基础音色；中文提示词会先编译成英文 persona，再送到 CosyVoice `/instruct` | 是 | 当前默认 provider |
 | `edge_online` | 只在网关层做 style 匹配、选音色和格式兜底；`prompt_text` 不会传给 `edge_tts` | 否 | 最终只能靠 `voice_id` 生效 |
 
 一句话说明：
@@ -243,6 +243,7 @@ Content-Type: application/json
 - `edge_online` 没有原生 prompt 能力，所以仍然走“提示词选音色”的路由模式
 - 如果最终落到 `edge_online`，网关会自动把输出格式切成 `mp3`，避免 `edge_tts engine currently supports mp3 only`
 - `style_presets` 负责“选方向 / 选基础音色”，不会替代 `cosyvoice_local` 的真实 `/instruct`
+- `cosyvoice_local` 为了避免模型把中文提示词本身读出来，不会原样透传中文关键词串；网关会先把它改写成更适合 CosyVoice-Instruct 的英文 persona 描述
 
 使用建议：
 
@@ -270,8 +271,8 @@ Content-Type: application/json
 }
 ```
 
-在默认 `cosyvoice_local` 链路下，这段 `prompt_text` 会继续透传给 CosyVoice `/instruct`。  
-同时网关也会从中提取 `male / bright / steady` 相关信号，优先帮你选到更贴近“男声、干练、明亮”的基础音色，例如 `default_male`。
+在默认 `cosyvoice_local` 链路下，这段 `prompt_text` 不会直接原样送到模型。  
+网关会先从中提取 `male / bright / steady` 相关信号，优先帮你选到更贴近“男声、干练、明亮”的基础音色，例如 `default_male`；随后再把中文提示词编译成英文 persona 描述，送到 CosyVoice `/instruct`。
 
 如果你把同样的请求改成 `provider=edge_online`，那就不再是真实 instruct，而会退化成“根据关键词选择更接近的 Edge 音色”。
 
@@ -292,7 +293,7 @@ Content-Type: application/json
 
 按 provider 看最终行为：
 
-- `provider=cosyvoice_local`：`prompt_text` 会继续传给 CosyVoice `/instruct`，`style_presets` 只负责辅助选基础音色
+- `provider=cosyvoice_local`：中文 `prompt_text` 会先被编译成英文 persona，再传给 CosyVoice `/instruct`，`style_presets` 只负责辅助选基础音色
 - `provider=edge_online`：`prompt_text` 不会传给 `edge_tts`，只用于路由和选音色
 
 ## 兼容旧接口

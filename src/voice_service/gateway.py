@@ -19,6 +19,8 @@ SIGNAL_TERMS: dict[str, tuple[str, ...]] = {
     "broadcast": ("播报", "直播", "主持", "主播", "口播"),
 }
 
+PROMPT_VOICE_CACHE_VERSION = "prompt_voice_v2"
+
 
 class TtsGateway:
     def __init__(self, config: AppConfig) -> None:
@@ -124,6 +126,9 @@ class TtsGateway:
         if req.reference_audio_base64:
             ref_hash = hashlib.sha256(req.reference_audio_base64.encode("utf-8")).hexdigest()[:12]
         mix_signature = ",".join(f"{item.voice_id}:{item.weight:.3f}" for item in req.mix_voices)
+        prompt_signature = (req.prompt_text or "").strip()
+        if req.mode == "prompt_voice":
+            prompt_signature = f"{PROMPT_VOICE_CACHE_VERSION}|{prompt_signature}"
         normalized = "|".join(
             [
                 provider_name,
@@ -133,7 +138,7 @@ class TtsGateway:
                 f"{req.speed:.2f}",
                 resolved_format,
                 (req.reference_text or "").strip(),
-                (req.prompt_text or "").strip(),
+                prompt_signature,
                 mix_signature,
                 ref_hash,
             ]

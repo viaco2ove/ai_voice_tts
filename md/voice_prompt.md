@@ -10,6 +10,14 @@
 - 所以“提示词音色”现在是分 provider 的，不再是统一的假实现
 - 如果你理解的“提示词音色”是“把整段描述直接喂给真实 TTS 模型，让模型自己决定怎么说”，这个能力现在只在 `cosyvoice_local` 这条链路上成立
 
+先看能力矩阵：
+
+| provider | 网关会做什么 | 上游模型会不会真的吃 `prompt_text` | 应该怎么理解 |
+| --- | --- | --- | --- |
+| `cosyvoice_local` | 解析提示词，辅助选择基础音色 | 会，但中文提示词会先被编译成英文 persona，再送到 CosyVoice `/instruct` | 真提示控制 + 基础音色辅助 |
+| `edge_online` | 解析提示词，匹配 style，选择 Edge 音色 | 不会 | 只是“提示词选音色” |
+| `mock` | 做一些假的本地调试差异 | 不重要 | 仅用于测试链路 |
+
 ## 先把实话写明白
 
 旧版本下，这个“提示词音色”对真实 provider 来说，本质上主要就是匹配和路由。
@@ -20,6 +28,7 @@
 - 它先在网关层解析 `prompt_text`
 - 如果当前 provider 支持真实 prompt/instruct，就优先走真实能力
 - 如果当前 provider 不支持，再退回到 `style_presets` / `voice_id` 路由
+- `style_presets` 的作用只是“先帮你选一个更合适的基础音色”，不是替代模型本身的提示控制
 
 也就是说：
 
@@ -37,8 +46,10 @@
 `cosyvoice_local`
 
 - 现在会优先走真实的 CosyVoice `/instruct`
-- 网关会把 `prompt_text` 透传给本地 CosyVoice
+- 网关不会把中文提示词原样透传给本地 CosyVoice
+- 中文提示词会先被改写成更贴近官方示例的英文 persona 描述，再送到 `/instruct`
 - 同时仍然会根据提示词推断更合适的基础音色，例如 `default_male` / `default_female`
+- 这个“推断基础音色”是网关前置动作，不会替代 `/instruct`
 - 所以对 `cosyvoice_local` 来说，`prompt_voice` 已经不是单纯假的匹配器了
 - 默认不传 `provider` 时，当前项目就是走这条链路
 
@@ -53,6 +64,11 @@
 
 - 你要“模型真的吃提示词”，就用 `cosyvoice_local`
 - 你要的是 `edge_online`，那它现在仍然只是根据提示词帮你挑 Edge 音色
+
+如果想看得更直白，可以这样理解：
+
+- `cosyvoice_local`：先用提示词选底色，再把提示词编译成更适合 CosyVoice 的 instruct 交给模型继续发挥
+- `edge_online`：只用提示词选底色，模型本身并不知道你写了什么人设
 
 `mock`
 
@@ -75,8 +91,9 @@
 
 当前实际是：
 
-- `cosyvoice_local`：会把 `prompt_text` 继续透传给 CosyVoice instruct
+- `cosyvoice_local`：中文 `prompt_text` 会先转成英文 persona，再交给 CosyVoice instruct
 - `edge_online`：不会，仍然只在网关层用于匹配
+- 所以同一句提示词，在不同 provider 下，真实生效机制是不一样的
 
 它会先做“选风格 / 选音色方向”：
 
@@ -104,6 +121,7 @@
 
 - 当前 provider 如果已经支持真实 prompt/instruct，网关不会为了命中别的 style 就跨 provider 抢路由
 - 所以默认 `cosyvoice_local` 不会因为 `bright_stream` 分数更高就跳到 `edge_online`
+- 对 `cosyvoice_local` 来说，style 命中的意义主要是“先选基础男声/女声”，不是替代 `/instruct`
 
 如果这个 style 绑定的是 `edge_online`，输出格式也会自动改成 `mp3`。  
 这是因为 `edge_tts` 当前不支持 `wav`。
@@ -245,7 +263,14 @@
 - 会识别 `steady`
 - 会识别 `bright`
 - 会对“男提示词命中女风格”做扣分
-- 默认 `cosyvoice_local` 还会继续把整段 `prompt_text` 交给 CosyVoice instruct
+- 默认 `cosyvoice_local` 还会把整段提示意图继续交给 CosyVoice instruct，只是中文会先被编译成英文 persona
+
+所以现在它不再是以前那种“纯假的提示词框”，但也不是所有 provider 都已经升级成真提示控制。
+
+这里再补一句关键事实：
+
+- 直接把中文关键词串原样喂给 `CosyVoice-300M-Instruct`，很容易出现“把提示词本身读出来”的问题
+- 所以网关现在会先把中文提示词编译成英文 persona，再送给 CosyVoice
 
 所以像上面这句，现在会优先路由到更接近“男声、干练、坚定”的风格，默认会落到：
 
@@ -253,7 +278,7 @@
 cosyvoice_local / default_male
 ```
 
-而且这次不只是“路由到男声”，`prompt_text` 本身也会继续传给 CosyVoice instruct。
+而且这次不只是“路由到男声”，提示词本身的风格意图也会继续交给 CosyVoice instruct。
 
 ## 推荐怎么写提示词
 
@@ -303,6 +328,22 @@ cosyvoice_local / default_male
 ```
 
 这样即使提示词没有命中任何 style，也不会直接失败，而且回退方向仍然可控。
+
+如果你明确想测试“CosyVoice 是否真的理解这段提示词”，最好显式传：
+
+```json
+{
+  "provider": "cosyvoice_local",
+  "mode": "prompt_voice",
+  "voice_id": "default_male",
+  "prompt_text": "青年男性，干练，自信，明亮，有力，朝气"
+}
+```
+
+这时网关会做两件事：
+
+- 先把基础音色锁在 `cosyvoice_local/default_male`
+- 再把中文 `prompt_text` 编译成英文 persona 后传给 CosyVoice `/instruct`
 
 另外，如果前端固定传了 `format=wav`，但提示词把请求路由到了 `edge_online`，网关会自动回退成 `mp3`，避免出现：
 

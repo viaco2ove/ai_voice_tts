@@ -33,4 +33,19 @@ class CosyVoiceHttpEngineTests(unittest.TestCase):
         )
 
         self.assertEqual(payload["role"], "中文男")
-        self.assertEqual(payload["prompt_text"], "青年男性，干练，坚定")
+        self.assertEqual(payload["prompt_text"], "young adult male, crisp and capable, determined.")
+
+    def test_prompt_voice_keeps_english_instruct_prompt(self) -> None:
+        engine = CosyVoiceHttpEngine({"request_mode": "form"})
+
+        payload = engine._build_form_payload(
+            text="你好",
+            voice_id="default_male",
+            speed=1.0,
+            mode="prompt_voice",
+            reference_audio_base64=None,
+            reference_text=None,
+            prompt_text="A young male mythic hero, energetic, confident, powerful.",
+        )
+
+        self.assertEqual(payload["prompt_text"], "A young male mythic hero, energetic, confident, powerful.")
