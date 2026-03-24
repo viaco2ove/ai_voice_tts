@@ -28,13 +28,14 @@ class PromptVoiceFallbackTests(unittest.TestCase):
                     default_voice_id="default_female",
                     default_format="wav",
                     supported_modes=["text", "prompt_voice"],
+                    options={"instruct_api_url": "http://127.0.0.1:9233/instruct"},
                     startup=StartupConfig(),
                 ),
                 "edge_online": ProviderConfig(
                     name="edge_online",
-                    engine="mock",
+                    engine="edge_tts",
                     default_voice_id="zh-CN-XiaoxiaoNeural",
-                    default_format="wav",
+                    default_format="mp3",
                     supported_modes=["text", "prompt_voice"],
                     startup=StartupConfig(),
                 ),
@@ -145,3 +146,24 @@ class PromptVoiceFallbackTests(unittest.TestCase):
 
         self.assertEqual(provider.name, "cosyvoice_local")
         self.assertEqual(resolved_voice_id, "default_female")
+
+    def test_prompt_voice_keeps_native_prompt_provider_instead_of_cross_provider_routing(self) -> None:
+        gateway = self._build_gateway()
+        req = StandardTtsRequest(
+            text="你好，很高兴见到你。",
+            mode="prompt_voice",
+            prompt_text="青年男性，张扬，明亮，朝气，有力",
+        )
+
+        provider, resolved_voice_id = gateway._resolve_provider_and_voice(req)
+
+        self.assertEqual(provider.name, "cosyvoice_local")
+        self.assertEqual(resolved_voice_id, "default_male")
+
+    def test_edge_tts_requested_wav_falls_back_to_mp3(self) -> None:
+        gateway = self._build_gateway()
+        provider = gateway.providers["edge_online"]
+
+        resolved_format = gateway._resolve_output_format(provider, "wav")
+
+        self.assertEqual(resolved_format, "mp3")

@@ -14,6 +14,7 @@ providers:
     options:
       api_url: http://127.0.0.1:9233/tts
       clone_api_url: http://127.0.0.1:9233/clone
+      instruct_api_url: http://127.0.0.1:9233/instruct
       request_mode: form
       timeout_seconds: 120
       voice_mapping:

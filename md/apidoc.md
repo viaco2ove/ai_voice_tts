@@ -202,11 +202,21 @@ Content-Type: application/json
 ```
 
 ### `mode=prompt_voice`
-通过提示词把请求路由到更合适的 `style_presets` / `voice_id`。这是“规则打分式风格路由”，不是底层模型直接理解整段提示词。
+按 provider 采用不同策略，不再统一压成同一种“最差实现”：
+
+- `cosyvoice_local`：优先走真实的 CosyVoice `/instruct`，`prompt_text` 会透传到上游
+- `edge_online`：仍然走规则打分式风格路由，因为 `edge_tts` 不支持原生提示词控风格
+
+一句话说明：
+
+- 默认不传 `provider` 时，会走 `gateway.default_provider=cosyvoice_local`
+- 也就是说，当前默认链路下，`prompt_voice` 已经是真实的 CosyVoice instruct，不再只是假的关键词匹配
 
 匹配规则：
 
 - 先做标准化：统一大小写、去掉常见标点和多余空白
+- 如果当前 provider 支持真实 prompt/instruct，优先使用该 provider 的真实能力，不跨 provider 抢路由
+- 对 `cosyvoice_local` 来说，网关最多只会在 `cosyvoice_local` 内部帮助你挑更合适的基础音色，不会因为别的 provider 分数更高就跳到 `edge_online`
 - 第一优先级是直接命中：`style id`、`style label`、`prompt_keywords`
 - 第二优先级是语义信号打分：当前内置会识别 `male / female / gentle / story / steady / bright / broadcast` 这几类信号
 - 默认信号词示例：
@@ -218,6 +228,7 @@ Content-Type: application/json
 - `bright`：`活泼`、`明快`、`明亮`、`朝气`、`自信`、`有力`
 - `broadcast`：`播报`、`直播`、`主持`、`主播`
 - style 分数最高且大于 0 时，最终采用这个 style 对应的 `provider` 和 `voice_id`
+- style 选中的 provider 也会影响最终输出格式；例如路由到 `edge_online` 时，网关会自动使用 `mp3`
 - 如果提示词带有明显性别信号，但没有 style 命中，网关会优先在当前 provider 下推断更合适的男女声
 - 如果仍然无法推断，则按下面顺序回退：
 - 先使用请求体中的 `voice_id`
@@ -227,8 +238,11 @@ Content-Type: application/json
 建议：
 
 - `prompt_voice` 更适合“选风格 / 选音色方向”，不适合要求底层模型逐字理解复杂人设文案
-- 长段自然语言可以用，但真正起作用的是其中能命中的信号词，比如“男声 / 温柔 / 干练 / 明亮 / 播报 / 故事”
+- 对 `cosyvoice_local` 来说，`prompt_text` 已经会继续透传给真实 CosyVoice instruct；对 `edge_online` 来说，仍然只是路由辅助信息
+- 所以“整段人设文案是否真的被理解”这件事，要看 provider：`cosyvoice_local` 会继续吃这段文本，`edge_online` 不会
+- 长段自然语言现在可以用，但如果你需要稳定选到某个基础音色，里面最好仍然带上高信号词，比如“男声 / 温柔 / 干练 / 明亮 / 播报 / 故事”
 - 如果前端传的是自由描述文本，建议同时传 `provider`，必要时再传 `voice_id`
+- 如果前端固定传 `format=wav`，而提示词最终路由到了 `edge_online`，网关会自动改用 `mp3`，以免因为 `edge_tts` 的格式限制报错
 - 如果你希望某一类表达稳定命中，请继续在 `config/services.yaml` 的 `style_presets.prompt_keywords` 里补关键词
 
 ```json
@@ -250,7 +264,10 @@ Content-Type: application/json
 }
 ```
 
-当前规则不会逐字理解整段人设，但会从中提取 `male / bright / steady` 相关信号，优先路由到更贴近“男声、干练、明亮”的 style 或 voice。
+在默认 `cosyvoice_local` 链路下，这段 `prompt_text` 会继续透传给 CosyVoice instruct。
+同时网关也会从中提取 `male / bright / steady` 相关信号，优先帮你选到更贴近“男声、干练、明亮”的基础音色。
+
+如果你把同样的请求改成 `provider=edge_online`，那就不再是真实 instruct，而会退化成“根据关键词选择更接近的 Edge 音色”。
 
 未命中 style 时的兜底示例：
 
@@ -266,6 +283,11 @@ Content-Type: application/json
 ```
 
 上面这类请求即使没有命中任何 `style_presets`，也会回退到 `cosyvoice_local/default_female` 继续合成，不再返回 `400`。
+
+按 provider 看最终行为：
+
+- `provider=cosyvoice_local`：`prompt_text` 会继续传给 CosyVoice `/instruct`
+- `provider=edge_online`：`prompt_text` 不会传给 `edge_tts`，只用于路由和选音色
 
 ## 兼容旧接口
 

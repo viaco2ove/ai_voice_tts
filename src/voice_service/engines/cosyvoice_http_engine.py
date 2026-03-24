@@ -57,6 +57,7 @@ class CosyVoiceHttpEngine(TtsEngine):
                 mode=mode,
                 reference_audio_base64=reference_audio_base64,
                 reference_text=reference_text,
+                prompt_text=prompt_text,
             )
         elif protocol == "openai_json":
             payload = {
@@ -75,10 +76,15 @@ class CosyVoiceHttpEngine(TtsEngine):
         env_default = os.getenv("COSYVOICE_API_URL", "http://127.0.0.1:9233/tts")
         base_url = str(self.options.get("api_url", env_default))
         clone_api = self.options.get("clone_api_url")
+        instruct_api = self.options.get("instruct_api_url")
         if mode == "clone" and clone_api:
             return str(clone_api)
         if mode == "clone" and base_url.endswith("/tts"):
             return f"{base_url[:-4]}/clone"
+        if mode == "prompt_voice" and instruct_api:
+            return str(instruct_api)
+        if mode == "prompt_voice" and base_url.endswith("/tts"):
+            return f"{base_url[:-4]}/instruct"
         return base_url
 
     def _request(
@@ -163,7 +169,7 @@ class CosyVoiceHttpEngine(TtsEngine):
 
         if api_url.endswith("/v1/audio/speech"):
             return "openai_json"
-        if api_url.endswith("/tts") or api_url.endswith("/clone") or api_url.endswith("/clone_eq"):
+        if api_url.endswith("/tts") or api_url.endswith("/clone") or api_url.endswith("/clone_eq") or api_url.endswith("/instruct"):
             return "form"
         return "json"
 
@@ -176,6 +182,7 @@ class CosyVoiceHttpEngine(TtsEngine):
         mode: str,
         reference_audio_base64: str | None,
         reference_text: str | None,
+        prompt_text: str | None,
     ) -> dict[str, object]:
         payload: dict[str, object] = {"text": text, "speed": speed}
         if mode == "clone":
@@ -185,6 +192,10 @@ class CosyVoiceHttpEngine(TtsEngine):
             payload["encode"] = "base64"
             if reference_text:
                 payload["prompt_text"] = reference_text
+            return payload
+        if mode == "prompt_voice":
+            payload["role"] = self._map_voice_id(voice_id)
+            payload["prompt_text"] = (prompt_text or "").strip()
             return payload
         payload["role"] = self._map_voice_id(voice_id)
         return payload

@@ -65,7 +65,7 @@ class TtsGateway:
 
     async def synthesize(self, req: StandardTtsRequest) -> TtsResponse:
         provider, resolved_voice_id = self._resolve_provider_and_voice(req)
-        resolved_format = req.format or provider.default_format
+        resolved_format = self._resolve_output_format(provider, req.format)
         engine = self.engines[provider.name]
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -88,6 +88,15 @@ class TtsGateway:
             mix_voices=[item.model_dump() for item in req.mix_voices],
         )
         return self._build_response(req, provider.name, engine.name, resolved_voice_id, False, file_name, output_path)
+
+    def _resolve_output_format(self, provider: ProviderConfig, requested_format: str | None) -> str:
+        resolved_format = requested_format or provider.default_format
+
+        # edge_tts 当前只支持 mp3。prompt_voice/mix 可能把请求路由到 edge_online，
+        # 前端若仍然固定传 wav，会导致不必要的 400。这里统一回退到 provider 默认格式。
+        if provider.engine == "edge_tts" and resolved_format != "mp3":
+            return provider.default_format or "mp3"
+        return resolved_format
 
     def _build_response(
         self,
@@ -136,12 +145,24 @@ class TtsGateway:
         resolved_voice_id = req.voice_id or ""
 
         if req.mode == "prompt_voice":
-            style = self._resolve_style_preset(req.prompt_text or "")
-            # prompt_voice 优先命中 style_presets；未命中时回退到请求参数或默认音色，
-            # 避免前端因为提示词不精确而直接收到 400。
-            if style:
-                provider_name = style.provider
-                resolved_voice_id = style.voice_id
+            prompt_text = req.prompt_text or ""
+            current_provider = self.providers.get(provider_name)
+            # 按 provider 的真实能力分流：
+            # 1. 当前 provider 支持原生 prompt/instruct，就优先走真实能力，不跨 provider 路由。
+            # 2. 当前 provider 不支持原生 prompt，再退回到 style_presets 做路由。
+            if current_provider and self._provider_supports_native_prompt(current_provider):
+                style = self._resolve_style_preset(prompt_text, provider_name=current_provider.name)
+                if style:
+                    resolved_voice_id = style.voice_id
+                if not resolved_voice_id:
+                    inferred_voice_id = self._infer_voice_from_prompt(current_provider.name, prompt_text)
+                    if inferred_voice_id:
+                        resolved_voice_id = inferred_voice_id
+            else:
+                style = self._resolve_style_preset(prompt_text)
+                if style:
+                    provider_name = style.provider
+                    resolved_voice_id = style.voice_id
 
         if req.mode == "mix":
             dominant = max(req.mix_voices, key=lambda item: item.weight)
@@ -175,19 +196,26 @@ class TtsGateway:
                 return item
         return None
 
-    def _resolve_style_preset(self, prompt_text: str) -> StylePreset | None:
+    def _resolve_style_preset(self, prompt_text: str, provider_name: str | None = None) -> StylePreset | None:
         prompt_text = self._normalize_text(prompt_text)
         if not prompt_text:
             return None
 
         best_match: tuple[int, int, StylePreset] | None = None
         for item in self.config.style_presets:
+            if provider_name and item.provider != provider_name:
+                continue
             score, direct_hits = self._score_style_preset(prompt_text, item)
             if score <= 0:
                 continue
             if best_match is None or (score, direct_hits) > (best_match[0], best_match[1]):
                 best_match = (score, direct_hits, item)
         return best_match[2] if best_match else None
+
+    def _provider_supports_native_prompt(self, provider: ProviderConfig) -> bool:
+        if bool(provider.options.get("native_prompt_enabled", False)):
+            return True
+        return bool(str(provider.options.get("instruct_api_url", "")).strip())
 
     def _score_style_preset(self, prompt_text: str, item: StylePreset) -> tuple[int, int]:
         style_text = self._style_search_text(item)
